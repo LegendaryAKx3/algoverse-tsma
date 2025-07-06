@@ -1,0 +1,24 @@
+# Core ML packages
+torch>=2.0.0
+transformers>=4.30.0
+
+# SAE and interpretability
+sae-lens>=3.0.0
+transformer-lens>=1.0.0
+
+# Visualization packages
+matplotlib>=3.5.0
+seaborn>=0.11.0
+plotly>=5.0.0
+
+# Data analysis
+numpy>=1.21.0
+pandas>=1.3.0
+scikit-learn>=1.0.0
+
+# Experiment tracking
+wandb>=0.15.0
+
+# Additional utilities
+datasets>=2.0.0
+einops>=0.6.0
