@@ -3,7 +3,7 @@ torch>=2.0.0
 transformers>=4.30.0
 
 # SAE and interpretability
-sae-lens>=3.0.0
+sae-lens>=3.0.0  # Installed separately to avoid dependency conflicts
 transformer-lens>=1.0.0
 
 # Visualization packages
@@ -22,3 +22,6 @@ wandb>=0.15.0
 # Additional utilities
 datasets>=2.0.0
 einops>=0.6.0
+
+# Fix for Python 3.13 compatibility
+cffi>=1.17.0

@@ -7,34 +7,75 @@ import wandb
 from transformer_lens import HookedTransformer
 from sae_lens import LanguageModelSAERunnerConfig, SAETrainingRunner
 
+
+# find sae features corresponding to target token 
+# return list of feature ids 
+def analyze_token_features(
+    sae,
+    model,
+    hook_name: str,
+    prompts: list[str],
+    target_token: str,
+    top_k_features: int = 20,
+):
+
+    tok_id = model.to_single_token(target_token)
+
+    # run model and capture activations at the sae hook point
+    with torch.no_grad():
+        logits, cache = model.run_with_cache(prompts, names_filter=[hook_name])
+
+
+    h = cache[hook_name]
+    print("h.shape", h.shape) # shoud be batch by seq_LEN by hiddeN-dim
+    a = sae.encode(h)       
+    print("a.shape", a.shape) # should be batch by seq_len by num_features
+    
+
+
+    effect_vec = torch.matmul(sae.W_dec, model.W_U[:, tok_id])  
+
+   
+    contributions = (a * effect_vec).sum(dim=(0, 1))    
+
+    top_vals, top_ids = torch.topk(contributions, top_k_features)
+
+    print(f"\n top {top_k_features} SAE features increasing logit for '{target_token}':")
+    for rank, (fid, val) in enumerate(zip(top_ids, top_vals), 1):
+        print(f"{rank:2d}. Feature {fid.item():>5}  logit_change≈{val.item():.3f}")
+
+    return top_ids.tolist()
+
+
+
 def main():
     # Initialize wandb with proper login handling
-    try:
-        # Try to login to wandb (will prompt for API key if not logged in)
-        wandb.login()
+    # try:
+    #     # Try to login to wandb (will prompt for API key if not logged in)
+    #     wandb.login()
         
-        # Initialize wandb
-        wandb.init(
-            project="sparse-autoencoder-gpt2",
-            name="gpt2-sae-layer8",
-            config={
-                "model": "gpt2",
-                "hook_layer": 8,
-                "expansion_factor": 8,
-                "l1_coefficient": 1e-3,
-                "learning_rate": 1e-4,
-                "training_tokens": 100_000,
-            },
-            mode="online"  # Set to "offline" if you want to run without internet
-        )
-        print("Wandb intialized")
-    except Exception as e:
-        print(f"Wandb initialization failed: {e}")
-        # Initialize wandb in offline mode as fallback
-        wandb.init(mode="disabled")
+    #     # Initialize wandb
+    #     wandb.init(
+    #         project="sparse-autoencoder-gpt2",
+    #         name="gpt2-sae-layer8",
+    #         config={
+    #             "model": "gpt2",
+    #             "hook_layer": 8,
+    #             "expansion_factor": 8,
+    #             "l1_coefficient": 1e-3,
+    #             "learning_rate": 1e-4,
+    #             "training_tokens": 100_000,
+    #         },
+    #         mode="online"  # Set to "offline" if you want to run without internet
+    #     )
+    #     print("Wandb intialized")
+    # except Exception as e:
+    #     print(f"Wandb initialization failed: {e}")
+    #     # Initialize wandb in offline mode as fallback
+    #     wandb.init(mode="disabled")
     
     # Setup device
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "mps"
     print(f"Using device: {device}")
 
     # Load & hook GPT-2 via Transformer-Lens
@@ -53,17 +94,16 @@ def main():
         expansion_factor=8,
         
         # Training parameters
-        lr=1e-4,
+        lr=5e-5,
         l1_coefficient=1e-3,
-        training_tokens=100_000,  # Reduced for testing
+        training_tokens=2_000_000,  # Reduced for testing
         
         # Use a simple dataset approach
         dataset_path="NeelNanda/pile-10k",  # Smaller, more reliable dataset
         streaming=True,
         
         # Wandb integration
-        log_to_wandb=True,
-        wandb_project="sparse-autoencoder-gpt2",
+        log_to_wandb=False,
         
         device=device,
     )
@@ -72,10 +112,68 @@ def main():
     runner = SAETrainingRunner(cfg)
     print("Starting SAE training...")
     sae = runner.run()
+
+
     print("Training complete.")
 
+
+    import random
+    import pandas as pd
+
+    print("sae.W_dec.shape", sae.W_dec.shape)
+    print("model.W_U.shape", model.W_U.shape)
+    projection = sae.W_dec @ model.W_U 
+
+    n_features = projection.shape[0]
+    sample = random.sample(range(n_features), k=min(10, n_features))
+
+    print("top 10 tokens most increased by 10 random SAE features:\n")
+    for idx in sample:
+        vals, inds = torch.topk(projection[idx], 10)
+        tokens = model.to_str_tokens(inds)
+        print(f"Feature {idx:>4}: {tokens}")
+
+
+    paris_feature = analyze_token_features(
+        sae,
+        model,
+        hook_name,
+        ["The capital of France is"],
+        " Paris",
+        top_k_features=1,
+    )
+
+    feature_id = paris_feature[0]
+
+
+    # at hook layer, add sae activation linearly 
+    def generate_with_feature(feature_idx: int, prompt: str, scale: float = 15.0):
+        print("feature_idx", feature_idx)
+        def patch_fn(act, hook):
+
+            # activation shape: batch x seq x hidden_dim
+            delta = (scale * sae.W_dec[feature_idx]).to(act.device)
+            #print("delta.shape", delta.shape)
+            return act + delta.unsqueeze(0).unsqueeze(0)
+
+        # add_hook returns None; we clear later with reset_hooks
+        model.add_hook(hook_name, patch_fn)
+        try:
+            output = model.generate(prompt, max_new_tokens=60, temperature=0.8)
+        finally:
+            # remove all hooks to avoid affecting subsequent calls
+            model.reset_hooks()
+        return output
+
+    print(" vanilla generation")
+    print(model.generate("The capital of France is", max_new_tokens=60, temperature=0.8))
+
     
-    # Finish wandb run
-    wandb.finish()
+    print("generation with feature injection")
+    print(generate_with_feature(feature_id, "The capital of France is", scale=100.0))
+
 
 main()
+
+
+
