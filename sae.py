@@ -4,8 +4,12 @@ Train a Sparse Autoencoder (SAE) on GPT-2 residuals using SAE-Lens.
 
 import torch
 import wandb
+import random
+import pandas as pd
 from transformer_lens import HookedTransformer
-from sae_lens import LanguageModelSAERunnerConfig, SAETrainingRunner
+from sae_lens import LanguageModelSAERunnerConfig, SAETrainingRunner, SAE
+from sae_vis.data_config_classes import SaeVisConfig, SaeVisLayoutConfig
+from sae_vis.data_storing_fns import SaeVisData
 
 
 # find sae features corresponding to target token 
@@ -49,6 +53,10 @@ def analyze_token_features(
 
 
 def main():
+    # Configuration - set this to load from existing SAE
+    LOAD_FROM_SAVE = True  # Set to False to train from scratch
+    SAE_SAVE_PATH = "./checkpoints"  # Directory for saving/loading SAEs
+    
     # Initialize wandb with proper login handling
     # try:
     #     # Try to login to wandb (will prompt for API key if not logged in)
@@ -74,8 +82,8 @@ def main():
     #     # Initialize wandb in offline mode as fallback
     #     wandb.init(mode="disabled")
     
-    # Setup device
-    device = "cuda" if torch.cuda.is_available() else "mps"
+    # Setup device (On my machine mps does not work, only cpu - Adam)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
     # Load & hook GPT-2 via Transformer-Lens
@@ -84,42 +92,54 @@ def main():
     hook_name = "blocks.8.hook_resid_pre"
     model.reset_hooks()
 
-    # 3. Configure SAE-Lens training
-    cfg = LanguageModelSAERunnerConfig(
-        # Basic required parameters
-        model_name="gpt2",
-        hook_name=hook_name,
-        hook_layer=8,
-        d_in=768,  # GPT-2 base model dimension
-        expansion_factor=8,
+    sae = None
+    
+    if LOAD_FROM_SAVE:
+        # Try to load existing SAE
+        print("Loading SAE from checkpoint...")
+        sae = load_checkpoint(SAE_SAVE_PATH, device)
+        if sae is None:
+            print("Failed to load SAE, training from scratch...")
+            LOAD_FROM_SAVE = False
+        else:
+            print("SAE loaded successfully!")
+    
+    if not LOAD_FROM_SAVE:
+        # 3. Configure SAE-Lens training
+        cfg = LanguageModelSAERunnerConfig(
+            # Basic required parameters
+            model_name="gpt2",
+            hook_name=hook_name,
+            hook_layer=8,
+            d_in=768,  # GPT-2 base model dimension
+            expansion_factor=8,
+            
+            # Training parameters
+            lr=5e-5,
+            l1_coefficient=1e-3,
+            training_tokens=2_000_000,  # Reduced for testing
+            
+            # Use a simple dataset approach
+            dataset_path="NeelNanda/pile-10k",  # Smaller, more reliable dataset
+            streaming=True,
+            
+            # Wandb integration
+            log_to_wandb=False,
+            
+            device=device,
+        )
+
+        # 4. Instantiate and run training
+        runner = SAETrainingRunner(cfg)
+        print("Starting SAE training...")
+        sae = runner.run()
+        print("Training complete.")
         
-        # Training parameters
-        lr=5e-5,
-        l1_coefficient=1e-3,
-        training_tokens=2_000_000,  # Reduced for testing
-        
-        # Use a simple dataset approach
-        dataset_path="NeelNanda/pile-10k",  # Smaller, more reliable dataset
-        streaming=True,
-        
-        # Wandb integration
-        log_to_wandb=False,
-        
-        device=device,
-    )
+        # Save the trained SAE
+        print("Saving SAE...")
+        save_checkpoint(sae, SAE_SAVE_PATH)
 
-    # 4. Instantiate and run training
-    runner = SAETrainingRunner(cfg)
-    print("Starting SAE training...")
-    sae = runner.run()
-
-
-    print("Training complete.")
-
-
-    import random
-    import pandas as pd
-
+    # Analysis and generation experiments
     print("sae.W_dec.shape", sae.W_dec.shape)
     print("model.W_U.shape", model.W_U.shape)
     projection = sae.W_dec @ model.W_U 
@@ -133,7 +153,6 @@ def main():
         tokens = model.to_str_tokens(inds)
         print(f"Feature {idx:>4}: {tokens}")
 
-
     paris_feature = analyze_token_features(
         sae,
         model,
@@ -143,14 +162,21 @@ def main():
         top_k_features=1,
     )
 
-    feature_id = paris_feature[0]
+    risk_feature = analyze_token_features(
+        sae,
+        model,
+        hook_name,
+        ["When making strategic decisions, it is important to consider"],
+        " risk",
+        top_k_features=1,
+    )
 
+    feature_id = paris_feature[0]
 
     # at hook layer, add sae activation linearly 
     def generate_with_feature(feature_idx: int, prompt: str, scale: float = 15.0):
         print("feature_idx", feature_idx)
         def patch_fn(act, hook):
-
             # activation shape: batch x seq x hidden_dim
             delta = (scale * sae.W_dec[feature_idx]).to(act.device)
             #print("delta.shape", delta.shape)
@@ -165,12 +191,84 @@ def main():
             model.reset_hooks()
         return output
 
-    print(" vanilla generation")
+    print("vanilla generation")
     print(model.generate("The capital of France is", max_new_tokens=60, temperature=0.8))
+    print(model.generate("When making strategic decisions, it is important to consider", max_new_tokens=60, temperature=0.8))
 
-    
     print("generation with feature injection")
     print(generate_with_feature(feature_id, "The capital of France is", scale=100.0))
+    print(generate_with_feature(risk_feature[0], "When making strategic decisions, it is important to consider", scale=100.0))
+
+    # Create sample tokens for SAEVis
+    all_tokens = model.to_tokens("When making strategic decisions, it is important to consider")
+    sae_vis_data = SaeVisData.create(
+        sae=sae,
+        model=model,
+        tokens=all_tokens,
+        cfg=SaeVisConfig(features=range(16)),
+        verbose=True,
+    )
+
+    filename = "demo_feature_vis.html"
+    sae_vis_data.save_feature_centric_vis(filename, feature=8)
+    print(f"SAEVis dashboard saved to {filename}")
+
+
+
+
+def load_checkpoint(checkpoint_path, device):
+    """Load SAE from checkpoint directory."""
+    try:
+        import os
+        
+        if not os.path.exists(checkpoint_path):
+            print(f"Checkpoint directory {checkpoint_path} does not exist")
+            return None
+            
+        # Look for SAE files
+        sae_files = []
+        for file in os.listdir(checkpoint_path):
+            if file.endswith(('.pt', '.safetensors')) and 'sae' in file.lower():
+                sae_files.append(file)
+        
+        if not sae_files:
+            print(f"No SAE files found in {checkpoint_path}")
+            return None
+        
+        # Load from path
+        sae_file = sorted(sae_files)[-1]
+        
+        sae_path = os.path.join(checkpoint_path, sae_file)
+        print(f"Loading SAE from: {sae_path}")
+        
+        # Load SAE
+        sae = SAE.load_from_disk(sae_path, device=device)
+        return sae
+        
+    except Exception as e:
+        print(f"Error loading SAE: {e}")
+        return None
+    
+def save_checkpoint(sae, checkpoint_path):
+    """Save SAE to checkpoint directory."""
+    try:
+        import os
+        from datetime import datetime
+        
+        os.makedirs(checkpoint_path, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        sae_filename = f"sae{timestamp}.safetensors"
+        sae_path = os.path.join(checkpoint_path, sae_filename)
+        
+        # Save using SAE-Lens
+        sae.save_model(sae_path)
+        print(f"SAE saved to: {sae_path}")
+        
+    except Exception as e:
+        print(f"Error saving SAE: {e}")
+
+
 
 
 main()
