@@ -7,7 +7,7 @@ import wandb
 import random
 import pandas as pd
 from transformer_lens import HookedTransformer
-from sae_lens import LanguageModelSAERunnerConfig, SAETrainingRunner, SAE
+from sae_lens import LanguageModelSAERunnerConfig, SAETrainingRunner, SAE, HookedSAETransformer
 from sae_vis.data_config_classes import SaeVisConfig, SaeVisLayoutConfig
 from sae_vis.data_storing_fns import SaeVisData
 
@@ -87,7 +87,7 @@ def main():
     print(f"Using device: {device}")
 
     # Load & hook GPT-2 via Transformer-Lens
-    model = HookedTransformer.from_pretrained("gpt2", device=device)
+    model = HookedSAETransformer.from_pretrained("gpt2", device=device)
     # Choose a residual stream hook point (e.g. before block 9)
     hook_name = "blocks.8.hook_resid_pre"
     model.reset_hooks()
@@ -147,60 +147,63 @@ def main():
     n_features = projection.shape[0]
     sample = random.sample(range(n_features), k=min(10, n_features))
 
-    print("top 10 tokens most increased by 10 random SAE features:\n")
-    for idx in sample:
-        vals, inds = torch.topk(projection[idx], 10)
-        tokens = model.to_str_tokens(inds)
-        print(f"Feature {idx:>4}: {tokens}")
+    # print("top 10 tokens most increased by 10 random SAE features:\n")
+    # for idx in sample:
+    #     vals, inds = torch.topk(projection[idx], 10)
+    #     tokens = model.to_str_tokens(inds)
+    #     print(f"Feature {idx:>4}: {tokens}")
 
-    paris_feature = analyze_token_features(
-        sae,
-        model,
-        hook_name,
-        ["The capital of France is"],
-        " Paris",
-        top_k_features=1,
-    )
+    # paris_feature = analyze_token_features(
+    #     sae,
+    #     model,
+    #     hook_name,
+    #     ["The capital of France is"],
+    #     " Paris",
+    #     top_k_features=1,
+    # )
 
-    risk_feature = analyze_token_features(
-        sae,
-        model,
-        hook_name,
-        ["When making strategic decisions, it is important to consider"],
-        " risk",
-        top_k_features=1,
-    )
+    # risk_feature = analyze_token_features(
+    #     sae,
+    #     model,
+    #     hook_name,
+    #     ["When making strategic decisions, it is important to consider"],
+    #     " risk",
+    #     top_k_features=1,
+    # )
 
-    feature_id = paris_feature[0]
+    # feature_id = paris_feature[0]
 
-    # at hook layer, add sae activation linearly 
-    def generate_with_feature(feature_idx: int, prompt: str, scale: float = 15.0):
-        print("feature_idx", feature_idx)
-        def patch_fn(act, hook):
-            # activation shape: batch x seq x hidden_dim
-            delta = (scale * sae.W_dec[feature_idx]).to(act.device)
-            #print("delta.shape", delta.shape)
-            return act + delta.unsqueeze(0).unsqueeze(0)
+    # # at hook layer, add sae activation linearly 
+    # def generate_with_feature(feature_idx: int, prompt: str, scale: float = 15.0):
+    #     print("feature_idx", feature_idx)
+    #     def patch_fn(act, hook):
+    #         # activation shape: batch x seq x hidden_dim
+    #         delta = (scale * sae.W_dec[feature_idx]).to(act.device)
+    #         #print("delta.shape", delta.shape)
+    #         return act + delta.unsqueeze(0).unsqueeze(0)
 
-        # add_hook returns None; we clear later with reset_hooks
-        model.add_hook(hook_name, patch_fn)
-        try:
-            output = model.generate(prompt, max_new_tokens=60, temperature=0.8)
-        finally:
-            # remove all hooks to avoid affecting subsequent calls
-            model.reset_hooks()
-        return output
+    #     # add_hook returns None; we clear later with reset_hooks
+    #     model.add_hook(hook_name, patch_fn)
+    #     try:
+    #         output = model.generate(prompt, max_new_tokens=60, temperature=0.8)
+    #     finally:
+    #         # remove all hooks to avoid affecting subsequent calls
+    #         model.reset_hooks()
+    #     return output
 
-    print("vanilla generation")
-    print(model.generate("The capital of France is", max_new_tokens=60, temperature=0.8))
-    print(model.generate("When making strategic decisions, it is important to consider", max_new_tokens=60, temperature=0.8))
+    # print("vanilla generation")
+    # print(model.generate("The capital of France is", max_new_tokens=60, temperature=0.8))
+    # print(model.generate("When making strategic decisions, it is important to consider", max_new_tokens=60, temperature=0.8))
 
-    print("generation with feature injection")
-    print(generate_with_feature(feature_id, "The capital of France is", scale=100.0))
-    print(generate_with_feature(risk_feature[0], "When making strategic decisions, it is important to consider", scale=100.0))
+    # print("generation with feature injection")
+    # print(generate_with_feature(feature_id, "The capital of France is", scale=100.0))
+    # print(generate_with_feature(risk_feature[0], "When making strategic decisions, it is important to consider", scale=100.0))
 
-    # Create sample tokens for SAEVis
+    # The main problem right now is that in order for this function to work, I need to use HookedSAETransformer instead of HookedTransformer
+    # If I do this, it causes the generation/feature injection to not work
+    # If I comment generation out, I get a different error which I think is about an operation on a tensor
     all_tokens = model.to_tokens("When making strategic decisions, it is important to consider")
+    model.add_sae(sae)
     sae_vis_data = SaeVisData.create(
         sae=sae,
         model=model,
