@@ -8,9 +8,6 @@ import random
 import pandas as pd
 from transformer_lens import HookedTransformer
 from sae_lens import LanguageModelSAERunnerConfig, SAETrainingRunner, SAE
-from sae_vis.data_config_classes import SaeVisConfig, SaeVisLayoutConfig
-from sae_vis.data_storing_fns import SaeVisData
-
 
 # find sae features corresponding to target token 
 # return list of feature ids 
@@ -54,7 +51,7 @@ def analyze_token_features(
 
 def main():
     # Configuration - set this to load from existing SAE
-    LOAD_FROM_SAVE = True  # Set to False to train from scratch
+    LOAD_FROM_SAVE = False  # Set to False to train from scratch
     SAE_SAVE_PATH = "./checkpoints"  # Directory for saving/loading SAEs
     
     # Initialize wandb with proper login handling
@@ -117,11 +114,12 @@ def main():
             # Training parameters
             lr=5e-5,
             l1_coefficient=1e-3,
-            training_tokens=2_000_000,  # Reduced for testing
+            training_tokens=100_000,  # Reduced for testing
             
             # Use a simple dataset approach
-            dataset_path="NeelNanda/pile-10k",  # Smaller, more reliable dataset
+            dataset_path="LegendaryAKx3/sae-kuhn-poker",  # Smaller, more reliable dataset
             streaming=True,
+            context_size=800,
             
             # Wandb integration
             log_to_wandb=False,
@@ -153,25 +151,36 @@ def main():
         tokens = model.to_str_tokens(inds)
         print(f"Feature {idx:>4}: {tokens}")
 
-    paris_feature = analyze_token_features(
+    # paris_feature = analyze_token_features(
+    #     sae,
+    #     model,
+    #     hook_name,
+    #     ["The capital of France is"],
+    #     " Paris",
+    #     top_k_features=1,
+    # )
+
+    fold_feature = analyze_token_features(
         sae,
         model,
         hook_name,
-        ["The capital of France is"],
-        " Paris",
+        ["The next action to take (from bet, fold) is"],
+        "fold",
         top_k_features=1,
     )
 
-    risk_feature = analyze_token_features(
+    bet_feature = analyze_token_features(
         sae,
         model,
         hook_name,
-        ["When making strategic decisions, it is important to consider"],
-        " risk",
+        ["The next action to take (from bet, fold) is"],
+        "fold",
         top_k_features=1,
     )
 
-    feature_id = paris_feature[0]
+    # feature_id = paris_feature[0]
+    fold_id = fold_feature[0]
+    bet_id = bet_feature[0]
 
     # at hook layer, add sae activation linearly 
     def generate_with_feature(feature_idx: int, prompt: str, scale: float = 15.0):
@@ -192,26 +201,11 @@ def main():
         return output
 
     print("vanilla generation")
-    print(model.generate("The capital of France is", max_new_tokens=60, temperature=0.8))
-    print(model.generate("When making strategic decisions, it is important to consider", max_new_tokens=60, temperature=0.8))
+    print(model.generate("The next action to take (from bet, fold) is", max_new_tokens=60, temperature=0.8))
 
     print("generation with feature injection")
-    print(generate_with_feature(feature_id, "The capital of France is", scale=100.0))
-    print(generate_with_feature(risk_feature[0], "When making strategic decisions, it is important to consider", scale=100.0))
-
-    # Create sample tokens for SAEVis
-    all_tokens = model.to_tokens("When making strategic decisions, it is important to consider")
-    sae_vis_data = SaeVisData.create(
-        sae=sae,
-        model=model,
-        tokens=all_tokens,
-        cfg=SaeVisConfig(features=range(16)),
-        verbose=True,
-    )
-
-    filename = "demo_feature_vis.html"
-    sae_vis_data.save_feature_centric_vis(filename, feature=8)
-    print(f"SAEVis dashboard saved to {filename}")
+    print(generate_with_feature(fold_id, "The next action to take (from bet, fold) is", scale=100.0))
+    print(generate_with_feature(bet_id, "The next action to take (from bet, fold) is", scale=100.0))
 
 
 
