@@ -83,8 +83,8 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    # Load & hook GPT-2 via Transformer-Lens
-    model = HookedTransformer.from_pretrained("gpt2", device=device)
+    # Load & hook Qwen/Qwen2.5-3B via Transformer-Lens
+    model = HookedTransformer.from_pretrained("Qwen/Qwen2.5-3B", device=device)
     # Choose a residual stream hook point (e.g. before block 9)
     hook_name = "blocks.8.hook_resid_pre"
     model.reset_hooks()
@@ -105,16 +105,16 @@ def main():
         # 3. Configure SAE-Lens training
         cfg = LanguageModelSAERunnerConfig(
             # Basic required parameters
-            model_name="gpt2",
+            model_name="Qwen/Qwen2.5-3B",
             hook_name=hook_name,
             hook_layer=8,
-            d_in=768,  # GPT-2 base model dimension
+            d_in=2048,  # Qwen/Qwen2.5-3B model dimension
             expansion_factor=8,
             
             # Training parameters
             lr=5e-5,
             l1_coefficient=1e-3,
-            training_tokens=100_000,  # Reduced for testing
+            training_tokens=2_000_000,  # Reduced for testing
             
             # Use a simple dataset approach
             dataset_path="LegendaryAKx3/sae-kuhn-poker",  # Smaller, more reliable dataset
