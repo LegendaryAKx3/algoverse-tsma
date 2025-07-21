@@ -7,8 +7,7 @@ import wandb
 import random
 import pandas as pd
 from transformer_lens import HookedTransformer
-from sae_lens import LanguageModelSAERunnerConfig, SAETrainingRunner, SAE, StandardTrainingSAEConfig, LoggingConfig
-torch.cuda.empty_cache()
+from sae_lens import LanguageModelSAERunnerConfig, SAETrainingRunner, SAE
 
 # find sae features corresponding to target token 
 # return list of feature ids 
@@ -105,35 +104,27 @@ def main():
     if not LOAD_FROM_SAVE:
         # 3. Configure SAE-Lens training
         cfg = LanguageModelSAERunnerConfig(
-    # 1) put all SAE‐specific settings in here:
-    sae=StandardTrainingSAEConfig(
-        d_in=2048,
-        d_sae=2048 * 8,                # expansion_factor × d_in
-        apply_b_dec_to_input=False,    # optional defaults
-        normalize_activations="none",
-        l1_coefficient=1e-3,
-    ),
-    # 2) data + model
-    model_name="Qwen/Qwen2.5-3B",
-    hook_name=hook_name,
-    dataset_path="LegendaryAKx3/sae-kuhn-poker",
-    streaming=True,
-    context_size=800,
-    # 3) training params
-    lr=5e-5,
-    train_batch_size_tokens=4096,      # choose your batch size
-    n_batches_in_buffer=64,
-    training_tokens=2_000_000,
-    store_batch_size_prompts=16,
-    # 4) logging (optional)
-    logger=LoggingConfig(log_to_wandb=False),
-    # 5) misc
-    device=device,
-    seed=42,
-    n_checkpoints=0,
-    checkpoint_path="checkpoints",
-    dtype="float16",
-)
+            # Basic required parameters
+            model_name="Qwen/Qwen2.5-3B",
+            hook_name=hook_name,
+            hook_layer=8,
+            d_in=2048,  # Qwen/Qwen2.5-3B model dimension
+            expansion_factor=8,
+            
+            # Training parameters
+            lr=5e-5,
+            l1_coefficient=1e-3,
+            training_tokens=2_000_000,  # Reduced for testing
+
+            dataset_path="LegendaryAKx3/sae-kuhn-poker",  
+            streaming=True,
+            context_size=800,
+            
+            # Wandb integration
+            log_to_wandb=False,
+            
+            device=device,
+        )
 
         # 4. Instantiate and run training
         runner = SAETrainingRunner(cfg)
@@ -214,6 +205,8 @@ def main():
     print("generation with feature injection")
     print(generate_with_feature(fold_id, "The next action to take (from bet, fold) is", scale=100.0))
     print(generate_with_feature(bet_id, "The next action to take (from bet, fold) is", scale=100.0))
+nt(generate_with_feature(risk_feature[0], "When making strategic decisions, it is important to consider", scale=100.0))
+
 
 
 
@@ -274,3 +267,6 @@ def save_checkpoint(sae, checkpoint_path):
 
 
 main()
+
+
+

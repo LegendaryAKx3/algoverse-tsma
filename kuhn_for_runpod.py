@@ -7,7 +7,8 @@ import wandb
 import random
 import pandas as pd
 from transformer_lens import HookedTransformer
-from sae_lens import LanguageModelSAERunnerConfig, SAETrainingRunner, SAE
+from sae_lens import LanguageModelSAERunnerConfig, SAETrainingRunner, SAE, StandardTrainingSAEConfig, LoggingConfig
+torch.cuda.empty_cache()
 
 # find sae features corresponding to target token 
 # return list of feature ids 
@@ -51,7 +52,7 @@ def analyze_token_features(
 
 def main():
     # Configuration - set this to load from existing SAE
-    LOAD_FROM_SAVE = False  # Set to False to train from scratch
+    LOAD_FROM_SAVE = True  # Set to False to train from scratch
     SAE_SAVE_PATH = "./checkpoints"  # Directory for saving/loading SAEs
     
     # Initialize wandb with proper login handling
@@ -84,7 +85,10 @@ def main():
     print(f"Using device: {device}")
 
     # Load & hook Qwen/Qwen2.5-3B via Transformer-Lens
-    model = HookedTransformer.from_pretrained("Qwen/Qwen2.5-3B", device=device)
+    model = HookedTransformer.from_pretrained("Qwen/Qwen2.5-3B", 
+                                              device=device,
+                                             low_cpu_mem_usage=True,
+                                            )
     # Choose a residual stream hook point (e.g. before block 9)
     hook_name = "blocks.8.hook_resid_pre"
     model.reset_hooks()
@@ -104,28 +108,35 @@ def main():
     if not LOAD_FROM_SAVE:
         # 3. Configure SAE-Lens training
         cfg = LanguageModelSAERunnerConfig(
-            # Basic required parameters
-            model_name="Qwen/Qwen2.5-3B",
-            hook_name=hook_name,
-            hook_layer=8,
-            d_in=2048,  # Qwen/Qwen2.5-3B model dimension
-            expansion_factor=8,
-            
-            # Training parameters
-            lr=5e-5,
-            l1_coefficient=1e-3,
-            training_tokens=2_000_000,  # Reduced for testing
-            
-            # Use a simple dataset approach
-            dataset_path="LegendaryAKx3/sae-kuhn-poker",  # Smaller, more reliable dataset
-            streaming=True,
-            context_size=800,
-            
-            # Wandb integration
-            log_to_wandb=False,
-            
-            device=device,
-        )
+    # 1) put all SAE‐specific settings in here:
+    sae=StandardTrainingSAEConfig(
+        d_in=2048,
+        d_sae=2048 * 8,                # expansion_factor × d_in
+        apply_b_dec_to_input=False,    # optional defaults
+        normalize_activations="none",
+        l1_coefficient=1e-3,
+    ),
+    # 2) data + model
+    model_name="Qwen/Qwen2.5-3B",
+    hook_name=hook_name,
+    dataset_path="LegendaryAKx3/sae-kuhn-poker",
+    streaming=True,
+    context_size=800,
+    # 3) training params
+    lr=5e-5,
+    train_batch_size_tokens=2048,      # choose your batch size
+    n_batches_in_buffer=16,
+    training_tokens=2_000_000,
+    store_batch_size_prompts=4,
+    # 4) logging (optional)
+    logger=LoggingConfig(log_to_wandb=False),
+    # 5) misc
+    device=device,
+    seed=42,
+    n_checkpoints=0,
+    checkpoint_path="checkpoints",
+    dtype="float32",
+)
 
         # 4. Instantiate and run training
         runner = SAETrainingRunner(cfg)
@@ -159,13 +170,16 @@ def main():
     #     " Paris",
     #     top_k_features=1,
     # )
+    prompt = "You are playing a two-player zero-sum game. Make valid actions to win.\nObservation: \n[GAME] You are Player 1 in a 5 round game of Kuhn Poker.\nGame Rules:\n- Kuhn Poker uses a 3-card deck with J, Q, K (J lowest, K highest)\n- Each player antes 1 chip and receives 1 card each round\n- Game continues for 5 rounds\n- The player with the most chips after all rounds wins\n\nAction Rules:\n- '[check]': Pass without betting (only if no bet is on the table)\n- '[bet]': Add 1 chip to the pot (only if no bet is on the table)\n- '[call]': Match an opponent's bet by adding 1 chip to the pot\n- '[fold]': Surrender your hand and let your opponent win the pot\n\n\n[GAME] Starting round 1 out of 5 rounds.\nYour card is: K\nYour available actions are: [check], [bet]\nGive only a one word response of the option that you choose: "
 
+    prompt2 = "You are playing a two-player zero-sum game. Make valid actions to win.\nObservation: \n[GAME] You are Player 1 in a 5 round game of Kuhn Poker.\nGame Rules:\n- Kuhn Poker uses a 3-card deck with J, Q, K (J lowest, K highest)\n- Each player antes 1 chip and receives 1 card each round\n- Game continues for 5 rounds\n- The player with the most chips after all rounds wins\n\nAction Rules:\n- '[check]': Pass without betting (only if no bet is on the table)\n- '[bet]': Add 1 chip to the pot (only if no bet is on the table)\n- '[call]': Match an opponent's bet by adding 1 chip to the pot\n- '[fold]': Surrender your hand and let your opponent win the pot\n\n\n[GAME] Starting round 1 out of 5 rounds.\nYour card is: K\nYour available actions are: [check], [bet]\nGive only a one word response of the option that you choose: "
+    
     fold_feature = analyze_token_features(
         sae,
         model,
         hook_name,
-        ["The next action to take (from bet, fold) is"],
-        "fold",
+        [prompt],
+        " check",
         top_k_features=1,
     )
 
@@ -173,8 +187,8 @@ def main():
         sae,
         model,
         hook_name,
-        ["The next action to take (from bet, fold) is"],
-        "fold",
+        [prompt],
+        " bet",
         top_k_features=1,
     )
 
@@ -201,13 +215,11 @@ def main():
         return output
 
     print("vanilla generation")
-    print(model.generate("The next action to take (from bet, fold) is", max_new_tokens=60, temperature=0.8))
+    print(model.generate(prompt, max_new_tokens=60, temperature=0.8))
 
     print("generation with feature injection")
-    print(generate_with_feature(fold_id, "The next action to take (from bet, fold) is", scale=100.0))
-    print(generate_with_feature(bet_id, "The next action to take (from bet, fold) is", scale=100.0))
-nt(generate_with_feature(risk_feature[0], "When making strategic decisions, it is important to consider", scale=100.0))
-
+    print(generate_with_feature(fold_id, prompt2, scale=100.0))
+    print(generate_with_feature(bet_id, prompt2, scale=100.0))
 
 
 
@@ -268,6 +280,3 @@ def save_checkpoint(sae, checkpoint_path):
 
 
 main()
-
-
-
