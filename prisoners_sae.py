@@ -52,7 +52,7 @@ def analyze_token_features(
 
 def main():
     # Configuration - set this to load from existing SAE
-    LOAD_FROM_SAVE = False  # Set to False to train from scratch
+    LOAD_FROM_SAVE = True  # Set to False to train from scratch
     SAE_SAVE_PATH = "./checkpoints_prs"  # Directory for saving/loading SAEs
     
     # Initialize wandb with proper login handling
@@ -167,28 +167,30 @@ def main():
     #     " Paris",
     #     top_k_features=1,
     # )
+    prompt1 = "<|im_start|>user\nYou are Player 0 in a 5 round Prisoner’s Dilemma. This is round 1. The payoff matrix is:\n  Both you and opponent cooperate → each gets 3 points\n  You cooperate and opponent defects → you get 0; opponent gets 5\n  You defect and opponent cooperates → you get 5; opponent gets 0\n  Both you and opponent defect → each gets 1 point\nBased on your opponent's previous decisions, decide whether to [Cooperate] or [Defect] to ultimately maximize your points..\nPlease put your final answer, either Cooperate [C] or Defect [D] to ultimately maximize your points..\nPlease put your final answer, either [C] or [D]  then terminate.\nNo previous rounds since it is round 1<|im_end|>"
+    prompt2 = "<|im_start|>user\nYou are Player 0 in a 5 round Prisoner’s Dilemma. This is round 1. The payoff matrix is:\n  Both you and opponent cooperate → each gets 3 points\n  You cooperate and opponent defects → you get 0; opponent gets 5\n  You defect and opponent cooperates → you get 5; opponent gets 0\n  Both you and opponent defect → each gets 1 point\nBased on your opponent's previous decisions, decide whether to Cooperate [C] or Defect [D] to ultimately maximize your points..\nPlease put your final answer, either [C] or [D] then terminate.\n\nNo previous rounds since it is round 1<|im_end|>"
 
-    fold_feature = analyze_token_features(
+    coop_feature = analyze_token_features(
         sae,
         model,
         hook_name,
-        ["The next action to take (from bet, fold) is"],
-        "fold",
+        [prompt1],
+        " C",
         top_k_features=1,
     )
 
-    bet_feature = analyze_token_features(
+    def_feature = analyze_token_features(
         sae,
         model,
         hook_name,
-        ["The next action to take (from bet, fold) is"],
-        "fold",
+        [prompt1],
+        " D",
         top_k_features=1,
     )
 
     # feature_id = paris_feature[0]
-    fold_id = fold_feature[0]
-    bet_id = bet_feature[0]
+    coop_id = coop_feature[0]
+    def_id = def_feature[0]
 
     # at hook layer, add sae activation linearly 
     def generate_with_feature(feature_idx: int, prompt: str, scale: float = 15.0):
@@ -209,11 +211,11 @@ def main():
         return output
 
     print("vanilla generation")
-    print(model.generate("The next action to take (from bet, fold) is", max_new_tokens=60, temperature=0.8))
+    print(model.generate(prompt1, max_new_tokens=60, temperature=0.8))
 
     print("generation with feature injection")
-    print(generate_with_feature(fold_id, "The next action to take (from bet, fold) is", scale=100.0))
-    print(generate_with_feature(bet_id, "The next action to take (from bet, fold) is", scale=100.0))
+    print(generate_with_feature(coop_id, prompt2, scale=100.0))
+    print(generate_with_feature(def_id, prompt2, scale=100.0))
 
 
 
