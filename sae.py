@@ -51,7 +51,7 @@ def analyze_token_features(
 
 def main():
     # Configuration - set this to load from existing SAE
-    LOAD_FROM_SAVE = False  # Set to False to train from scratch
+    LOAD_FROM_SAVE = True  # Set to False to train from scratch
     SAE_SAVE_PATH = "./checkpoints"  # Directory for saving/loading SAEs
     
     # Initialize wandb with proper login handling

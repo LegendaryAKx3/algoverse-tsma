@@ -5,6 +5,7 @@ checkpoints/
 env/
 ENV/
 venv.bak/
+phh-dataset/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -78,7 +79,8 @@ ipython_config.py
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow
 __pypackages__/
-
+pretrain_ckpt/
+phh-dataset/
 # Celery stuff
 celerybeat-schedule
 celerybeat.pid
