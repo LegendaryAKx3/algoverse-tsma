@@ -157,8 +157,8 @@ def determine_winner(board, hole_cards, folded):
     """
     scores = {}
     for player, cards in hole_cards.items():
-        if player in folded or len(cards) != 2:
-            continue
+        # if player in folded or len(cards) != 2:
+        #     continue
         seven = cards + board
         score, best5 = best_hand_from_seven(seven)
         scores[player] = (score, best5)
