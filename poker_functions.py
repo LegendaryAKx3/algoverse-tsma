@@ -72,88 +72,102 @@ def is_straight(ranks):
 
 def evaluate_five(cards):
     """
-    Given exactly 5 Card objects, return a tuple:
-      (category_code, tiebreaker1, tiebreaker2, ...)
-    Higher tuples mean better hands.
+    Evaluate 5-card hand with simple integer scoring.
+    Returns a single integer score where higher is better.
     
-    Categories (highest to lowest):
-      9 = Straight Flush
-      8 = Four of a Kind
-      7 = Full House
-      6 = Flush
-      5 = Straight
-      4 = Three of a Kind
-      3 = Two Pair
-      2 = One Pair
-      1 = High Card
+    Score ranges:
+    9000-9999: Straight Flush
+    8000-8999: Four of a Kind  
+    7000-7999: Full House
+    6000-6999: Flush
+    5000-5999: Straight
+    4000-4999: Three of a Kind
+    3000-3999: Two Pair
+    2000-2999: One Pair
+    1000-1999: High Card
     """
     ranks = sorted((RANK_ORDER[c.rank] for c in cards), reverse=True)
     rc = rank_counts(cards)
-    counts = sorted(rc.values(), reverse=True)    # e.g. [3,2] for full house
-    distinct = sorted(set(ranks), reverse=True)
+    counts = sorted(rc.values(), reverse=True)
     flush = is_flush(cards)
     straight, top_straight = is_straight(sorted(set(ranks)))
     
-    # straight flush
+    # Straight flush: 9000 + top card rank (suit doesn't matter for ranking)
     if flush and straight:
-        return (9, top_straight)
-    # four of a kind
+        return 9000 + top_straight
+    
+    # Four of a kind: 8000 + quad rank*50 + kicker
     if counts[0] == 4:
-        quad_rank = [r for r, cnt in rc.items() if cnt==4][0]
-        kicker = max(r for r in ranks if r != RANK_ORDER[quad_rank])
-        return (8, RANK_ORDER[quad_rank], kicker)
-    # full house
+        quad_rank = max(RANK_ORDER[r] for r, cnt in rc.items() if cnt == 4)
+        kicker = max(r for r in ranks if r != quad_rank)
+        return 8000 + quad_rank * 50 + kicker
+    
+    # Full house: 7000 + trips*50 + pair
     if counts == [3,2]:
-        trip = [r for r,cnt in rc.items() if cnt==3][0]
-        pair = [r for r,cnt in rc.items() if cnt==2][0]
-        return (7, RANK_ORDER[trip], RANK_ORDER[pair])
-    # flush
+        trip_rank = max(RANK_ORDER[r] for r, cnt in rc.items() if cnt == 3)
+        pair_rank = max(RANK_ORDER[r] for r, cnt in rc.items() if cnt == 2)
+        return 7000 + trip_rank * 50 + pair_rank
+    
+    # Flush: 6000 + all 5 cards (suit doesn't affect ranking)
     if flush:
-        return (6, *ranks)
-    # straight
+        return 6000 + ranks[0]*50 + ranks[1]*4 + ranks[2]*3 + ranks[3]*2 + ranks[4]
+    
+    # Straight: 5000 + top card
     if straight:
-        return (5, top_straight)
-    # three of a kind
+        return 5000 + top_straight
+    
+    # Three of a kind: 4000 + trips*30 + kicker1*2 + kicker2
     if counts[0] == 3:
-        trip = [r for r,cnt in rc.items() if cnt==3][0]
-        kickers = sorted((RANK_ORDER[r] for r,cnt in rc.items() if cnt==1), reverse=True)
-        return (4, RANK_ORDER[trip], *kickers)
-    # two pair
+        trip_rank = max(RANK_ORDER[r] for r, cnt in rc.items() if cnt == 3)
+        kickers = sorted([r for r in ranks if r != trip_rank], reverse=True)
+        return 4000 + trip_rank * 30 + kickers[0] * 2 + kickers[1]
+    
+    # Two pair: 3000 + high_pair*30 + low_pair*2 + kicker
     if counts == [2,2,1]:
-        pairs = sorted((RANK_ORDER[r] for r,cnt in rc.items() if cnt==2), reverse=True)
-        kicker = [RANK_ORDER[r] for r,cnt in rc.items() if cnt==1][0]
-        return (3, *pairs, kicker)
-    # one pair
+        pairs = sorted([RANK_ORDER[r] for r, cnt in rc.items() if cnt == 2], reverse=True)
+        kicker = max(RANK_ORDER[r] for r, cnt in rc.items() if cnt == 1)
+        return 3000 + pairs[0] * 30 + pairs[1] * 2 + kicker
+    
+    # One pair: 2000 + pair*50 + kicker1*4 + kicker2*2 + kicker3
     if counts[0] == 2:
-        pair = [r for r,cnt in rc.items() if cnt==2][0]
-        kickers = sorted((RANK_ORDER[r] for r,cnt in rc.items() if cnt==1), reverse=True)
-        return (2, RANK_ORDER[pair], *kickers)
-    # high card
-    return (1, *ranks)
+        pair_rank = max(RANK_ORDER[r] for r, cnt in rc.items() if cnt == 2)
+        kickers = sorted([r for r in ranks if r != pair_rank], reverse=True)
+        return 2000 + pair_rank * 50 + kickers[0] * 4 + kickers[1] * 2 + kickers[2]
+    
+    # High card: 1000 + high*50 + second*4 + third*3 + fourth*2 + fifth
+    return 1000 + ranks[0]*50 + ranks[1]*4 + ranks[2]*3 + ranks[3]*2 + ranks[4]
 
 def evaluate_hole_cards(hole_cards):
-    """Evaluate strength of just 2 hole cards for preflop."""
+    """Evaluate strength of just 2 hole cards for preflop with simple integer scoring."""
     if len(hole_cards) != 2:
         return (0,)
     
     ranks = sorted([RANK_ORDER[c.rank] for c in hole_cards], reverse=True)
     suited = hole_cards[0].suit == hole_cards[1].suit
     
-    # Pair
-    if ranks[0] == ranks[1]:
-        return (3, ranks[0])
-    # Suited cards
-    elif suited:
-        return (2, ranks[0], ranks[1])
-    # Offsuit
-    else:
-        return (1, ranks[0], ranks[1])
+    if ranks[0] == ranks[1]:  # Pair
+        # Pairs: 300-312 (AA=312, KK=311, ..., 22=300)
+        base_score = 300 + ranks[0] - 2
+        return (base_score,)
+    elif suited:  # Suited cards
+        # Suited: 200-299 range, subtract gap penalty
+        gap_penalty = abs(ranks[0] - ranks[1])
+        base_score = 200 + ranks[0] + ranks[1] - gap_penalty
+        return (base_score,)
+    else:  # Offsuit
+        # Offsuit: 100-199 range, subtract larger gap penalty
+        gap_penalty = abs(ranks[0] - ranks[1]) * 2
+        base_score = 100 + ranks[0] + ranks[1] - gap_penalty
+        return (base_score,)
 
 def evaluate_hand_any_stage(hole_cards, board):
-    """Evaluate hand strength at any stage of the game."""
-    # Preflop: just evaluate hole cards
+    """Evaluate hand strength at any stage with simple integer scoring."""
+    if len(hole_cards) != 2:
+        return 0
+    
+    # Preflop: use hole card evaluation
     if len(board) == 0:
-        return evaluate_hole_cards(hole_cards)
+        return evaluate_hole_cards(hole_cards)[0]
     
     # Post-flop: combine hole cards with board
     all_cards = hole_cards + board
@@ -165,16 +179,43 @@ def evaluate_hand_any_stage(hole_cards, board):
         else:
             return best_hand_from_seven(all_cards)[0]
     
+    # Less than 5 cards: partial evaluation with simple scoring
+    ranks = sorted([RANK_ORDER[c.rank] for c in all_cards], reverse=True)
+    rc = rank_counts(all_cards)
+    counts = sorted(rc.values(), reverse=True)
+    
+    # Adjust scoring for partial hands (3-4 cards total)
+    if counts[0] >= 3:  # Three of a kind with 3-4 cards
+        trip_rank = max(RANK_ORDER[r] for r, cnt in rc.items() if cnt >= 3)
+        return 4000 + trip_rank * 30  # Similar to full 5-card trips
+    elif counts[0] == 2:
+        if len(counts) >= 2 and counts[1] == 2:  # Two pair
+            pairs = sorted([RANK_ORDER[r] for r, cnt in rc.items() if cnt == 2], reverse=True)
+            return 3000 + pairs[0] * 30 + pairs[1] * 2
+        else:  # One pair
+            pair_rank = max(RANK_ORDER[r] for r, cnt in rc.items() if cnt == 2)
+            kickers = [r for r in ranks if r != pair_rank]
+            kicker_sum = sum(kickers[:3])  # Up to 3 kickers
+            return 2000 + pair_rank * 50 + kicker_sum
+    else:  # High card
+        return 1000 + ranks[0] * 50 + sum(ranks[1:4])  # High card + next 3
+    
 
 def best_hand_from_seven(seven_cards):
-    """Find best 5-card hand from 7 cards."""
-    best = None
+    """
+    Find best 5-card hand from 7 cards following Texas Hold'em rules.
+    Returns (score, best_5_cards) where score follows standard poker rankings.
+    """
+    best_score = 0
     best_5 = None
+    
+    # Try all possible 5-card combinations from the 7 cards
     for combo in combinations(seven_cards, 5):
-        rank = evaluate_five(combo)
-        if best is None or rank > best:
-            best, best_5 = rank, combo
-    return best, best_5
+        score = evaluate_five(combo)
+        if score > best_score:
+            best_score, best_5 = score, combo
+    
+    return best_score, best_5
 
 # --- overall winner determination ---
 def determine_winner(board, hole_cards):
@@ -201,23 +242,32 @@ def determine_winner(board, hole_cards):
 # --- example usage ---
 if __name__ == "__main__":
     log = [
-      "d dh p1 7s5s",
-      "d dh p2 Jc3c",
-      "d dh p3 8c2s",
-      "d dh p4 KsJd",
-      "d dh p5 Td5d",
+      "d dh p1 KcKs",
+      "d dh p2 4h2s",
+      "d dh p3 Ah2d",
+      "d dh p4 9h8h",
+      "d dh p5 4cKh",
+      "d dh p6 8sJh",
       "p3 f",
-      "p4 cbr 400000",
+      "p4 cbr 200",
       "p5 f",
-      "p1 f",
-      "p2 cc",
-      "d db 8dAdQc",
-      "p2 cc",
-      "p4 cbr 350000",
-      "p2 f"
+      "p6 f",
+      "p1 cbr 850",
+      "p2 f",
+      "p4 cc",
+      "d db QsTc8d",
+      "p1 cc",
+      "p4 cc",
+      "d db 7h",
+      "p1 cbr 1350",
+      "p4 cc",
+      "d db 7s",
+      "p1 cbr 3375",
+      "p4 f"
     ]
 
     board, holes = parse_game_log(log)
     
-    # Show winners at different stages
-    print(f"Winner: {determine_winner(board, holes)}")
+    print(f"\nWinner: {determine_winner(board, holes)}")
+    score = evaluate_hand_any_stage(holes["p1"], board)
+    print(f"P1 Score: {score}")
