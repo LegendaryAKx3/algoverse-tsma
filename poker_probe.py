@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import List, Dict
 
 import torch, torch.nn as nn
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, random_split, Subset
+import numpy as np
 
 # Import classes from poker_gpt to avoid code duplication
 from poker_gpt import CharTokenizer as BaseCharTokenizer, GPT, GPTConfig
@@ -98,17 +99,51 @@ def train_probe(args):
     for p in base_model.parameters():
         p.requires_grad = False   # freeze GPT weights
 
-    # Setup probe: linear classifier on pooled features
-    probe = nn.Linear(gpt_cfg["n_embd"], 1).to(device)
-    crit  = nn.BCEWithLogitsLoss()
+    # Setup probe: linear classifier with 2 output logits (True/False)
+    probe = nn.Linear(gpt_cfg["n_embd"], 2).to(device)
+    crit  = nn.CrossEntropyLoss()
     opt   = torch.optim.AdamW(probe.parameters(), lr=1e-3)
 
-    # Prepare train/validation splits
-    ds     = PokerProbeDS(args.dataset_path, tok, block_sz)
+    # Prepare stratified train/validation splits for balanced validation
+    ds = PokerProbeDS(args.dataset_path, tok, block_sz)
+    
+    # Get all labels for stratified splitting
+    all_labels = [ds[i][1].item() for i in range(len(ds))]
+    indices = np.arange(len(ds))
+    
+    # Separate indices by class
+    win_indices = indices[np.array(all_labels) == 1.0]
+    loss_indices = indices[np.array(all_labels) == 0.0]
+    
+    print(f"Total samples: {len(ds)}")
+    print(f"Win samples: {len(win_indices)}, Loss samples: {len(loss_indices)}")
+    
+    # Calculate validation size to maintain balance
     val_sz = max(1, int(0.1 * len(ds)))
-    train_ds, val_ds = random_split(ds, [len(ds) - val_sz, val_sz])
-    train_dl = DataLoader(train_ds, batch_size=args.batch, shuffle=True,  drop_last=True)
-    val_dl   = DataLoader(val_ds,   batch_size=args.batch, shuffle=False, drop_last=False)
+    val_win_sz = min(val_sz // 2, len(win_indices))
+    val_loss_sz = min(val_sz // 2, len(loss_indices))
+    
+    # Randomly sample from each class for validation
+    np.random.seed(42)  # For reproducibility
+    val_win_idx = np.random.choice(win_indices, val_win_sz, replace=False)
+    val_loss_idx = np.random.choice(loss_indices, val_loss_sz, replace=False)
+    val_idx = np.concatenate([val_win_idx, val_loss_idx])
+    
+    # Remaining indices for training
+    train_idx = np.setdiff1d(indices, val_idx)
+    
+    # Create datasets
+    train_ds = Subset(ds, train_idx)
+    val_ds = Subset(ds, val_idx)
+    
+    # Verify balance in validation set
+    val_labels = [ds[i][1].item() for i in val_idx]
+    val_win_count = sum(val_labels)
+    val_loss_count = len(val_labels) - val_win_count
+    # print(f"Validation set: {val_win_count} wins, {val_loss_count} losses")
+    
+    train_dl = DataLoader(train_ds, batch_size=args.batch, shuffle=True, drop_last=True)
+    val_dl = DataLoader(val_ds, batch_size=args.batch, shuffle=False, drop_last=False)
 
     # Training loop
     for epoch in range(1, args.epochs + 1):
@@ -118,8 +153,9 @@ def train_probe(args):
             x, y = x.to(device), y.to(device)
             h = base_model(x)               # extract features (B,T,d)
             feats = h.mean(1)               # mean-pool over sequence
-            logits = probe(feats).squeeze()
-            loss   = crit(logits, y)
+            logits = probe(feats)           # (B, 2) - logits for [False, True]
+            y_long = y.long()               # convert to long for CrossEntropyLoss
+            loss   = crit(logits, y_long)
             
             opt.zero_grad()
             loss.backward()
@@ -134,8 +170,9 @@ def train_probe(args):
             for x, y in val_dl:
                 x, y = x.to(device), y.to(device)
                 feats  = base_model(x).mean(1)
-                preds  = torch.sigmoid(probe(feats).squeeze()) > 0.5
-                correct += (preds == y.bool()).sum().item()
+                logits = probe(feats)                    # (B, 2) logits
+                preds  = torch.argmax(logits, dim=1)     # get predicted class (0 or 1)
+                correct += (preds == y.long()).sum().item()
                 seen    += y.size(0)
         acc = correct / seen
         print(f"Epoch {epoch} - val acc {acc:.3%}")
