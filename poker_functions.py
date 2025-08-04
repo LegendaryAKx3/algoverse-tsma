@@ -23,11 +23,9 @@ def parse_game_log(lines):
     Given a list of log lines, returns:
       - board: list of Card
       - hole_cards: dict player_id -> list of Card
-      - folded: set of player_ids who folded
     """
     board = []
     hole_cards = {}
-    folded = set()
 
     for line in lines:
         parts = line.split()
@@ -40,15 +38,12 @@ def parse_game_log(lines):
         elif parts[0]=='d' and parts[1]=='db':
             new_cards = parse_cards(parts[2])
             board.extend(new_cards)
-        # player folds: "p2 f"
-        elif parts[0].startswith('p') and parts[1]=='f':
-            folded.add(parts[0])
         # showdown reveal: "p1 sm Ac2d"
         elif parts[0].startswith('p') and parts[1]=='sm':
             player, cards_str = parts[0], parts[2]
             hole_cards[player] = parse_cards(cards_str)
-        # else: ignore betting actions
-    return board, hole_cards, folded
+        # ignore folding and betting actions
+    return board, hole_cards
 
 # --- hand evaluation ---
 def rank_counts(cards):
@@ -136,11 +131,43 @@ def evaluate_five(cards):
     # high card
     return (1, *ranks)
 
+def evaluate_hole_cards(hole_cards):
+    """Evaluate strength of just 2 hole cards for preflop."""
+    if len(hole_cards) != 2:
+        return (0,)
+    
+    ranks = sorted([RANK_ORDER[c.rank] for c in hole_cards], reverse=True)
+    suited = hole_cards[0].suit == hole_cards[1].suit
+    
+    # Pair
+    if ranks[0] == ranks[1]:
+        return (3, ranks[0])
+    # Suited cards
+    elif suited:
+        return (2, ranks[0], ranks[1])
+    # Offsuit
+    else:
+        return (1, ranks[0], ranks[1])
+
+def evaluate_hand_any_stage(hole_cards, board):
+    """Evaluate hand strength at any stage of the game."""
+    # Preflop: just evaluate hole cards
+    if len(board) == 0:
+        return evaluate_hole_cards(hole_cards)
+    
+    # Post-flop: combine hole cards with board
+    all_cards = hole_cards + board
+    
+    # If we have 5+ cards, use standard poker hand evaluation
+    if len(all_cards) >= 5:
+        if len(all_cards) == 5:
+            return evaluate_five(all_cards)
+        else:
+            return best_hand_from_seven(all_cards)[0]
+    
+
 def best_hand_from_seven(seven_cards):
-    """
-    From 7 cards, try all 5‑card combos and pick the one with highest evaluate_five().
-    Returns (best_rank_tuple, best_5card_list).
-    """
+    """Find best 5-card hand from 7 cards."""
     best = None
     best_5 = None
     for combo in combinations(seven_cards, 5):
@@ -150,52 +177,47 @@ def best_hand_from_seven(seven_cards):
     return best, best_5
 
 # --- overall winner determination ---
-def determine_winner(board, hole_cards, folded):
+def determine_winner(board, hole_cards):
     """
-    Given board (list of Card), hole_cards dict, and folded set,
-    return list of winning player_ids (tie yields multiple).
+    Determine winner at any stage of the game.
+    Works for preflop (no board), flop (3 cards), turn (4 cards), or river (5 cards).
     """
     scores = {}
     for player, cards in hole_cards.items():
-        # if player in folded or len(cards) != 2:
-        #     continue
-        seven = cards + board
-        score, best5 = best_hand_from_seven(seven)
-        scores[player] = (score, best5)
+        if len(cards) != 2:  # Skip players without valid hole cards
+            continue
+        score = evaluate_hand_any_stage(cards, board)
+        scores[player] = score
 
-    # find max score
-    max_score = max(score for score, _ in scores.values())
-    # return all players matching it
-    winners = [p for p, (score, _) in scores.items() if score == max_score]
+    if not scores:
+        return []
+    
+    # Find max score
+    max_score = max(scores.values())
+    # Return all players matching it
+    winners = [p for p, score in scores.items() if score == max_score]
     return winners
 
 # --- example usage ---
 if __name__ == "__main__":
     log = [
-      "d dh p1 5d2d",  
-      "d dh p2 ????",  
-      "d dh p3 Jd6h",  
-      "p3 cbr 7000",
-      "p1 cbr 23000",
-      "p2 f",
-      "p3 cc",
-      "d db Jc9h5c",
-      "p1 cbr 35000",
-      "p3 cc",
-      "d db 4h",
-      "p1 cbr 90000",
-      "p3 cbr 232600",
-      "p1 cbr 1067100",
-      "p3 cc",
-      "p1 sm Ac2d",
-      "p3 sm 7h6h",
-      "d db Jh",
+      "d dh p1 7s5s",
+      "d dh p2 Jc3c",
+      "d dh p3 8c2s",
+      "d dh p4 KsJd",
+      "d dh p5 Td5d",
+      "p3 f",
+      "p4 cbr 400000",
+      "p5 f",
+      "p1 f",
+      "p2 cc",
+      "d db 8dAdQc",
+      "p2 cc",
+      "p4 cbr 350000",
+      "p2 f"
     ]
 
-    board, holes, folded = parse_game_log(log)
-    winners = determine_winner(board, holes, folded)
-    print("Board:", [''.join((c.rank,c.suit)) for c in board])
-    for p, cards in holes.items():
-        print(f"{p} hole cards:", [''.join((c.rank,c.suit)) for c in cards])
-    print("Folded:", folded)
-    print("Winner(s):", winners)
+    board, holes = parse_game_log(log)
+    
+    # Show winners at different stages
+    print(f"Winner: {determine_winner(board, holes)}")
