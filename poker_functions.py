@@ -40,7 +40,7 @@ def parse_game_log(lines):
             board.extend(new_cards)
         # showdown reveal: "p1 sm Ac2d"
         elif parts[0].startswith('p') and parts[1]=='sm':
-            player, cards_str = parts[0], parts[2]
+           # player, cards_str = parts[0], parts[2]
             hole_cards[player] = parse_cards(cards_str)
         # ignore folding and betting actions
     return board, hole_cards
