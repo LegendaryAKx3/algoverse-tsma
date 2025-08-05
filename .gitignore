@@ -121,5 +121,5 @@ dmypy.json
 ehthumbs.db
 Thumbs.db
 
-*.json
+
 *.jsonl
