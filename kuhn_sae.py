@@ -115,9 +115,8 @@ def main():
             lr=5e-5,
             l1_coefficient=1e-3,
             training_tokens=2_000_000,  # Reduced for testing
-            
-            # Use a simple dataset approach
-            dataset_path="LegendaryAKx3/sae-kuhn-poker",  # Smaller, more reliable dataset
+
+            dataset_path="LegendaryAKx3/sae-kuhn-poker",  
             streaming=True,
             context_size=800,
             
@@ -206,6 +205,8 @@ def main():
     print("generation with feature injection")
     print(generate_with_feature(fold_id, "The next action to take (from bet, fold) is", scale=100.0))
     print(generate_with_feature(bet_id, "The next action to take (from bet, fold) is", scale=100.0))
+nt(generate_with_feature(risk_feature[0], "When making strategic decisions, it is important to consider", scale=100.0))
+
 
 
 
