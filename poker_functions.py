@@ -1,7 +1,4 @@
-# poker_treys_equity.py
-#
 # Use Treys for Monte-Carlo equity and hand-type flags at any stage,
-# with safe evaluation to avoid KeyError bugs in Treys.
 
 import random
 from treys import Card, Deck, Evaluator
@@ -61,15 +58,13 @@ def safe_evaluate(cards: List[int], evaluator: Evaluator) -> int:
     return best
 
 
-def simulate_equity(hole: List[int], board: List[int], trials: int = 10000) -> float:
+def _equity_worker(args: Tuple[List[int], List[int], int]) -> Tuple[int, int, int]:
     """
-    Monte-Carlo win-rate vs one random opponent: returns float in [0.0, 1.0].
-    Ties count as half-wins. Completes board to 5 cards if needed.
-    Uses safe_evaluate to avoid bugs.
+    Worker for parallel equity simulation: returns (wins, ties, runs).
     """
-    wins = ties = 0
+    hole, board, trials = args
+    wins = ties = runs = 0
     evaluator = Evaluator()
-
     for _ in range(trials):
         deck = Deck()
         for c in hole + board:
@@ -81,12 +76,59 @@ def simulate_equity(hole: List[int], board: List[int], trials: int = 10000) -> f
 
         h_val = safe_evaluate(new_board + hole, evaluator)
         o_val = safe_evaluate(new_board + opp, evaluator)
+        runs += 1
         if h_val < o_val:
             wins += 1
         elif h_val == o_val:
             ties += 1
+    return wins, ties, runs
 
-    return (wins + ties * 0.5) / trials
+def simulate_equity(hole: List[int], board: List[int], trials: int = 10000, use_mp: bool = True) -> float:
+    """
+    Monte-Carlo win-rate vs one random opponent: returns float in [0.0, 1.0].
+    If use_mp, splits work across CPU cores.
+    """
+    if use_mp:
+        import multiprocessing
+        cpu = multiprocessing.cpu_count()
+        base = trials // cpu
+        extras = trials % cpu
+        jobs = []
+        for i in range(cpu):
+            n = base + (1 if i < extras else 0)
+            jobs.append((hole, board, n))
+        with multiprocessing.Pool(cpu) as pool:
+            results = pool.map(_equity_worker, jobs)
+        total_wins = total_ties = total_runs = 0
+        for w, t, r in results:
+            total_wins += w
+            total_ties += t
+            total_runs += r
+        if total_runs == 0:
+            return 0.0
+        return (total_wins + total_ties * 0.5) / total_runs
+    # fallback to single-process
+    wins = ties = runs = 0
+    evaluator = Evaluator()
+    for _ in range(trials):
+        deck = Deck()
+        for c in hole + board:
+            deck.cards.remove(c)
+        deck.shuffle()
+        opp = deck.draw(2)
+        needed = max(0, 5 - len(board))
+        new_board = board + deck.draw(needed)
+
+        h_val = safe_evaluate(new_board + hole, evaluator)
+        o_val = safe_evaluate(new_board + opp, evaluator)
+        runs += 1
+        if h_val < o_val:
+            wins += 1
+        elif h_val == o_val:
+            ties += 1
+    if runs == 0:
+        return 0.0
+    return (wins + ties * 0.5) / runs
 
 
 def preflop_analysis(hole: List[int], trials: int = 10000) -> Tuple[float, float]:
@@ -123,18 +165,26 @@ def preflop_analysis(hole: List[int], trials: int = 10000) -> Tuple[float, float
 # Example usage
 if __name__ == "__main__":
     log = [
-        "d dh p1 8sQc",
-        "d dh p2 2s8d",
-        "d dh p3 7dTs",
-        "d dh p4 5d8h",
-        "d dh p5 2h9s",
-        "d dh p6 6cQd",
-        "p3 f",
-        "p4 f",
-        "p5 f",
-        "p6 f",
-        "p1 cbr 300",
-        "p2 f"
+        "d dh p1 As6c",
+      "d dh p2 9c4c",
+      "d dh p3 3c5h",
+      "d dh p4 6h2s",
+      "d dh p5 Ks7c",
+      "d dh p6 3s9s",
+      "p3 f",
+      "p4 f",
+      "p5 f",
+      "p6 f",
+      "p1 cc",
+      "p2 cc",
+      "d db 5c8sTs",
+      "p1 cc",
+      "p2 cbr 150",
+      "p1 cc",
+      "d db Qc",
+      "p1 cc",
+      "p2 cbr 375",
+      "p1 f"
     ]
     board, holes = parse_game_log(log)
     hole1 = holes.get("p1", [])
@@ -150,13 +200,12 @@ if __name__ == "__main__":
     ]
 
     if not board:
-        score, equity = preflop_analysis(hole1, trials=20000)
-        print(f"P1 Avg raw score: {score:.1f}")
+        score, equity = preflop_analysis(hole1, trials=10000)
         print(f"P1 Equity:         {equity:.3f}")
         type_flags = {ht: False for ht in hand_types}
         print(f"P1 Hand types:     {type_flags}")
     else:
-        equity = simulate_equity(hole1, board, trials=20000)
+        equity = simulate_equity(hole1, board, trials=10000)
         print(f"P1 Equity:         {equity:.3f}")
         # Determine hand type flags
         score = safe_evaluate(board + hole1, evaluator)
