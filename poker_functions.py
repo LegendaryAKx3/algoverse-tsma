@@ -165,25 +165,18 @@ def preflop_analysis(hole: List[int], trials: int = 10000) -> Tuple[float, float
 # Example usage
 if __name__ == "__main__":
     log = [
-        "d dh p1 As6c",
-      "d dh p2 9c4c",
-      "d dh p3 3c5h",
-      "d dh p4 6h2s",
-      "d dh p5 Ks7c",
-      "d dh p6 3s9s",
+      "d dh p1 Kc3c",
+      "d dh p2 8s7s",
+      "d dh p3 Ts5d",
+      "d dh p4 4d7d",
+      "d dh p5 6d3s",
+      "d dh p6 Qc5h",
       "p3 f",
       "p4 f",
       "p5 f",
       "p6 f",
-      "p1 cc",
-      "p2 cc",
-      "d db 5c8sTs",
-      "p1 cc",
-      "p2 cbr 150",
-      "p1 cc",
-      "d db Qc",
-      "p1 cc",
-      "p2 cbr 375",
+      "p1 cbr 300",
+      "p2 cbr 1200",
       "p1 f"
     ]
     board, holes = parse_game_log(log)
@@ -203,6 +196,10 @@ if __name__ == "__main__":
         score, equity = preflop_analysis(hole1, trials=10000)
         print(f"P1 Equity:         {equity:.3f}")
         type_flags = {ht: False for ht in hand_types}
+        if Card.get_rank_int(hole1[0]) == Card.get_rank_int(hole1[1]):
+            type_flags["one-pair"] = True
+        else:
+            type_flags["high-card"] = True
         print(f"P1 Hand types:     {type_flags}")
     else:
         equity = simulate_equity(hole1, board, trials=10000)
