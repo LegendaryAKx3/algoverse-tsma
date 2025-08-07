@@ -1,8 +1,8 @@
 # poker_probe_regression.py
-"""Train a 2‑layer MLP probe on frozen Poker‑GPT features to predict hand strength scores.
+"""Train a 2‑layer MLP probe on frozen Poker‑GPT features to predict poker equity.
 
 This is a regression adaptation of the original probe script. The probe's function is
-p_θ(x) = W₂ ReLU(W₁ x), predicting continuous hand strength scores instead of win/loss.
+p_θ(x) = W₂ ReLU(W₁ x), predicting continuous equity values instead of win/loss.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ class GPTFeatureExtractor(nn.Module):
 # 3.  Dataset for regression (modified)
 # -----------------------------------------------------------------------------
 class PokerRegressionDS(Dataset):
-    """Dataset for probing GPT representations on poker hand strength prediction."""
+    """Dataset for probing GPT representations on poker equity prediction."""
 
     def __init__(self, json_path: Path, tok: CharTokenizer, block_size: int):
         with Path(json_path).open() as fh:
@@ -68,13 +68,13 @@ class PokerRegressionDS(Dataset):
 
         self.samples = []
         for hand in raw:
-            # Use the actions field (similar to log in classification dataset)
-            text = "\n".join(hand["actions"]) + "\n<END_HAND>\n"
+            # Use the board field (similar to actions in labeled dataset)
+            text = "\n".join(hand["board"]) + "\n<END_HAND>\n"
             ids = tok.encode(text)[:block_size]
             if len(ids) < 1:
                 continue
-            # Use the score field as regression target
-            self.samples.append((torch.tensor(ids, dtype=torch.long), float(hand["score"])))
+            # Use the equity field as regression target
+            self.samples.append((torch.tensor(ids, dtype=torch.long), float(hand["equity"])))
 
         self.block_size = block_size
 
@@ -82,17 +82,17 @@ class PokerRegressionDS(Dataset):
         return len(self.samples)
 
     def __getitem__(self, i):
-        ids, score = self.samples[i]
+        ids, equity = self.samples[i]
         if len(ids) < self.block_size:  # right‑pad
             pad = torch.zeros(self.block_size - len(ids), dtype=torch.long)
             ids = torch.cat([ids, pad])
-        return ids, torch.tensor(score, dtype=torch.float32)
+        return ids, torch.tensor(equity, dtype=torch.float32)
 
 # -----------------------------------------------------------------------------
 # 4.  2‑Layer MLP Regression Probe (modified for regression)
 # -----------------------------------------------------------------------------
 class MLPRegressionProbe(nn.Module):
-    """Non‑linear probe: Linear → ReLU → Linear mapping to single score output."""
+    """Non‑linear probe: Linear → ReLU → Linear mapping to single equity output."""
 
     def __init__(self, in_dim: int, hidden_dim: int):
         super().__init__()
@@ -140,11 +140,11 @@ def train_regression_probe(args):
 
     # ---- Dataset split ------------------------------------------------------
     ds = PokerRegressionDS(args.dataset_path, tok, block_sz)
-    scores = np.array([ds[i][1].item() for i in range(len(ds))])
+    equities = np.array([ds[i][1].item() for i in range(len(ds))])
     idx = np.arange(len(ds))
     
-    # Get score range for reporting
-    score_min, score_max = scores.min(), scores.max()
+    # Get equity range for reporting
+    equity_min, equity_max = equities.min(), equities.max()
     
     # Simple random split like in poker_probe_mlp.py
     val_size = max(1, int(0.1 * len(ds)))
@@ -156,7 +156,7 @@ def train_regression_probe(args):
     val_dl = DataLoader(Subset(ds, val_idx), batch_size=args.batch, shuffle=False, drop_last=False)
 
     print(f"Training samples: {len(train_idx)}, Validation samples: {len(val_idx)}")
-    print(f"Score range: {score_min:.1f} - {score_max:.1f}")
+    print(f"Equity range: {equity_min:.3f} - {equity_max:.3f}")
 
     # ---- Training loop ------------------------------------------------------
     for epoch in range(1, args.epochs + 1):
@@ -190,7 +190,7 @@ def train_regression_probe(args):
         
         avg_val_loss = val_loss / len(val_dl)
         mae = np.mean(abs_errors)
-        print(f"Epoch {epoch}  val MSE loss {avg_val_loss:.4f}  MAE {mae:.2f}")
+        print(f"Epoch {epoch}  val MSE loss {avg_val_loss:.6f}  MAE {mae:.4f}")
 
     # ---- Save ----------------------------------------------------------------
     if args.save_probe:
@@ -198,7 +198,7 @@ def train_regression_probe(args):
             "probe": probe.state_dict(), 
             "cfg": gpt_cfg, 
             "hidden_dim": args.hidden_dim,
-            "score_stats": {"min": score_min, "max": score_max}
+            "equity_stats": {"min": equity_min, "max": equity_max}
         }, args.save_probe)
         print("Regression probe saved to", args.save_probe)
 
@@ -208,7 +208,7 @@ def train_regression_probe(args):
 
 def get_args():
     p = argparse.ArgumentParser("Non‑linear (2‑layer MLP) regression probe on Poker‑GPT features")
-    p.add_argument("--dataset_path", type=str, required=True, help="Path to labeled_dataset.json")
+    p.add_argument("--dataset_path", type=str, required=True, help="Path to monte-carlo_dataset.json")
     p.add_argument("--gpt_ckpt", type=str, required=True, help="Path to pretrained GPT checkpoint (.pt)")
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--batch", type=int, default=64)
