@@ -1,0 +1,8 @@
+transformers>=4.41.0
+datasets>=2.19.0
+tokenizers>=0.15.2
+accelerate>=0.31.0
+torch>=2.2.0
+numpy>=1.24.0
+pyyaml>=6.0.1
+tqdm>=4.66.0
