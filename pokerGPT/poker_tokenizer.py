@@ -13,9 +13,9 @@ SPECIALS = [
     "<SEP>",
     # roles/streets
     "d", "dh", "db",
-    "p1","p2","p3","p4","p5","p6",
+    "p1", "p2", "p3", "p4", "p5", "p6",
     # actions
-    "cc","f","cbr","sm",
+    "cc", "f", "cbr", "sm",
 ]
 
 # Cards
@@ -35,7 +35,7 @@ def iter_training_tokens(data_dir):
             for line in f:
                 try:
                     arr = json.loads(line)
-                except:
+                except json.JSONDecodeError:
                     continue
                 for item in arr:
                     tokens = item.strip().split()
@@ -57,12 +57,11 @@ def main():
     tokenizer = Tokenizer(BPE(unk_token="<UNK>"))
     tokenizer.pre_tokenizer = Whitespace()
 
-    # BPE Trainer
+    # BPE Trainer without bet bins
     trainer = BpeTrainer(
         vocab_size=5000,  # adjust as needed
         min_frequency=1,
         special_tokens=SPECIALS +
-                       [f"BET_{i}" for i in range(64)] +
                        [r+s for r in RANKS for s in SUITS] +
                        ["|"]
     )
@@ -72,7 +71,7 @@ def main():
 
     # Save tokenizer
     tokenizer.save(os.path.join(args.out, "tokenizer.json"))
-    print("Saved BPE tokenizer to", os.path.join(args.out, "tokenizer.json"))
+    print("✅ Saved BPE tokenizer to", os.path.join(args.out, "tokenizer.json"))
 
 if __name__ == "__main__":
     main()
