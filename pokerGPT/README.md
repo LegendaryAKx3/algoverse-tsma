@@ -53,8 +53,12 @@ python infer.py   --ckpt artifacts/checkpoints/run1   --tokenizer artifacts/toke
 
 # 7) Activation extraction
 python activation_probe.py   --ckpt artifacts/checkpoints/run1   --tokenizer artifacts/tokenizer   --sequence 'd dh p1 2c6h | p1 cc | p2 cc | d db 4h8sTh | <GAP> | d db 7h'
-```
 
+# 8) Linear Probe
+python linearProbe.py --model checkpoints/best                                                                                         
+  --tokenizer artifacts/tokenizer/tokenizer.json                                                                                                                     
+  --data data/hand3.ndjson
+```
 ### Why this format? (Infilling with a causal model)
 We transform a sequence like:
 ```
