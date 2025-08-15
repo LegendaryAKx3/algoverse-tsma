@@ -1,7 +1,6 @@
 # Virtual Environment
 venv/
 wandb/
-checkpoints/
 env/
 ENV/
 venv.bak/
