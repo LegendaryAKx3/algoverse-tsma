@@ -114,10 +114,10 @@ def get_embeddings(texts, tokenizer, model, batch_size=64, max_length=128):
 # ---------------------------
 def load_preprocessed_data(file_path, max_samples=None):
     """
-    Load preprocessed poker dataset with equity labels.
+    Load preprocessed poker dataset with equity labels, using masked actions.
     
     Returns:
-        X_text: List of text representations
+        X_text: List of text representations (masked)
         y: Array of equity values
     """
     print(f"Loading preprocessed data from {file_path}...")
@@ -128,12 +128,33 @@ def load_preprocessed_data(file_path, max_samples=None):
     if max_samples:
         data = data[:max_samples]
     
-    X_text = [item['text_repr'] for item in data]
-    y = np.array([item['equity'] for item in data])
+    # Always use masked actions for training
+    X_text = []
+    y = []
     
-    print(f"Loaded {len(X_text)} samples")
+    for item in data:
+        # Try to get masked actions first, fallback to regular actions
+        if 'masked_actions' in item and item['masked_actions']:
+            # Convert masked actions list to text representation
+            masked_text = ' '.join(item['masked_actions'])
+            X_text.append(masked_text)
+            y.append(item['equity'])
+        else:
+            print(f"Warning: Skipping item - no masked_actions or text_repr found")
+            continue
+    
+    y = np.array(y)
+    
+    print(f"Loaded {len(X_text)} samples with masked actions")
     print(f"Equity range: {y.min():.3f} - {y.max():.3f}")
     print(f"Mean equity: {y.mean():.3f} ± {y.std():.3f}")
+    
+    # DEBUG: Show first few masked examples
+    print("=== First 3 masked examples ===")
+    for i in range(min(3, len(X_text))):
+        print(f"Sample {i+1}: {X_text[i][:100]}..." if len(X_text[i]) > 100 else f"Sample {i+1}: {X_text[i]}")
+        print(f"  Equity: {y[i]:.3f}")
+    print("=" * 40)
     
     return X_text, y
 
