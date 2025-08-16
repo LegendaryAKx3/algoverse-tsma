@@ -1,0 +1,18 @@
+{
+  "test_mse": 0.07114503532648087,
+  "test_mae": 0.22798117995262146,
+  "test_r2": 0.07785803079605103,
+  "train_mse": 0.06551578640937805,
+  "train_mae": 0.21778973937034607,
+  "train_r2": 0.144176185131073,
+  "n_samples": 27100,
+  "equity_range": {
+    "min": 0.0025,
+    "max": 1.0
+  },
+  "training_params": {
+    "epochs": 5000,
+    "learning_rate": 0.001,
+    "batch_size": 64
+  }
+}

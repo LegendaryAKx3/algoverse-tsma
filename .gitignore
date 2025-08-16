@@ -122,3 +122,4 @@ Thumbs.db
 
 
 *.jsonl
+pokerGPT/poker_env/*
